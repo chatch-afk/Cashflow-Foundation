@@ -1,3 +1,4 @@
+
 import React from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -99,7 +100,11 @@ function monthDiff(a, b) {
 
 function StatCard({ label, value, hint, emphasis = "default" }) {
   const valueClass =
-    emphasis === "good" ? "text-emerald-700" : emphasis === "bad" ? "text-red-700" : "text-slate-900";
+    emphasis === "good"
+      ? "text-emerald-700"
+      : emphasis === "bad"
+      ? "text-red-700"
+      : "text-slate-900";
   return (
     <div className="rounded-2xl border bg-white p-4">
       <div className="text-xs font-semibold text-slate-500">{label}</div>
@@ -141,12 +146,12 @@ function AuthGate({ onAuthed }) {
 
   async function handle() {
     setMsg("");
-    if (!supabase) return setMsg("Missing Supabase keys (.env.local).");
+    if (!supabase) return setMsg("Missing Supabase keys (.env.local / Vercel env vars).");
     try {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setMsg("Account created. If email confirmation is enabled, check your email.");
+        setMsg("Account created. (Email confirmation is off in dev.)");
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -200,7 +205,9 @@ function AuthGate({ onAuthed }) {
             {mode === "signup" ? "I already have an account" : "Create a new account"}
           </button>
 
-          {msg ? <div className="text-sm text-slate-700 bg-slate-50 border rounded-xl p-3">{msg}</div> : null}
+          {msg ? (
+            <div className="text-sm text-slate-700 bg-slate-50 border rounded-xl p-3">{msg}</div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -224,9 +231,11 @@ export default function App() {
       const { data } = await supabase.auth.getSession();
       setSession(data.session || null);
 
-      sub = supabase.auth.onAuthStateChange((_event, newSession) => {
-        setSession(newSession);
-      }).data.subscription;
+      sub = supabase.auth
+        .onAuthStateChange((_event, newSession) => {
+          setSession(newSession);
+        })
+        .data.subscription;
 
       setLoading(false);
     }
@@ -341,7 +350,10 @@ export default function App() {
     setState((s) => ({ ...s, ...p }));
   }
   function updateAccount(key, patchObj) {
-    setState((s) => ({ ...s, accounts: { ...s.accounts, [key]: { ...s.accounts[key], ...patchObj } } }));
+    setState((s) => ({
+      ...s,
+      accounts: { ...s.accounts, [key]: { ...s.accounts[key], ...patchObj } },
+    }));
   }
   function addNeed() {
     setState((s) => ({
@@ -392,9 +404,63 @@ export default function App() {
     patch({ currentMonth: monthAdd(currentMonth, 1) });
   }
 
+  // Instruction UX
+  const fromFamilyOffice = `Family Office (${accounts.familyOffice.institution || "—"} •••• ${accounts.familyOffice.last4 || "—"})`;
+  const toGiving = `Giving (${accounts.giving.institution || "—"} •••• ${accounts.giving.last4 || "—"})`;
+  const toLifestyle = `Lifestyle (${accounts.lifestyle.institution || "—"} •••• ${accounts.lifestyle.last4 || "—"})`;
+  const toWealth = `Wealth Creation (${accounts.wealth.institution || "—"}${accounts.wealth.last4 ? ` •••• ${accounts.wealth.last4}` : ""})`;
+
+  const transfers = [
+    { from: "Family Office", to: toGiving, amount: Math.max(0, givingAmount), purpose: "Charitable giving transfer" },
+    { from: "Family Office", to: toLifestyle, amount: toNumber(lifestyleMonthly), purpose: "Lifestyle monthly funding" },
+    { from: "Family Office", to: "(Internal) Needs reserve", amount: allocateToNeeds, purpose: "Earmark for upcoming needs (stays in Family Office)" },
+    { from: "Family Office", to: toWealth, amount: excess, purpose: "Excess cash to wealth creation" },
+  ];
+
+  const actionPlanSteps = [
+    `Confirm this month’s inflow: ${fmtUSD(inflow)} (Business + W-2/Other).`,
+    `Transfer giving: ${fmtUSD(Math.max(0, givingAmount))} → ${toGiving}.`,
+    `Transfer lifestyle: ${fmtUSD(toNumber(lifestyleMonthly))} → ${toLifestyle} (target 2× spend buffer: ${fmtUSD(lifestyleTargetBalance)}).`,
+    `Fund upcoming needs: click “Fund needs this month” to allocate ${fmtUSD(allocateToNeeds)} across next-6-month items.`,
+    `Transfer excess: ${fmtUSD(excess)} → ${toWealth}.`,
+    `Proof of completion: keep screenshots of transfers + bank balances.`,
+  ];
+
+  const copyText = [
+    `CASH FLOW FOUNDATION — ${currentMonth}`,
+    ``,
+    `FROM: ${fromFamilyOffice}`,
+    ``,
+    `THIS MONTH ACTION PLAN`,
+    ...actionPlanSteps.map((s, i) => `${i + 1}. ${s}`),
+    ``,
+    `MONTHLY TRANSFER INSTRUCTIONS`,
+    ...transfers.map((t) => `- From ${t.from} → To ${t.to} | Amount ${fmtUSD(t.amount)} | ${t.purpose}`),
+  ].join("\n");
+
+  async function copyInstructions() {
+    try {
+      await navigator.clipboard.writeText(copyText);
+      alert("Copied.");
+    } catch {
+      alert("Copy failed. (Browser blocked clipboard.)");
+    }
+  }
+
+  function printInstructions() {
+    window.print();
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+      <style>{`
+        @media print {
+          .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+
       <div className="max-w-7xl mx-auto space-y-4">
+        {/* Header */}
         <div className="rounded-2xl border bg-white p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -405,7 +471,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 print:hidden">
               <div className="text-xs font-semibold text-slate-500">Month</div>
               <select
                 value={currentMonth}
@@ -466,7 +532,9 @@ export default function App() {
                       />
                       <input
                         value={accounts[k].last4}
-                        onChange={(e) => updateAccount(k, { last4: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
+                        onChange={(e) =>
+                          updateAccount(k, { last4: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })
+                        }
                         placeholder="Last 4"
                         className="border rounded-xl px-3 py-2 text-sm bg-white"
                       />
@@ -479,6 +547,36 @@ export default function App() {
           ) : null}
         </div>
 
+        {/* Action Plan */}
+        <div className="rounded-2xl border bg-white p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-lg font-semibold">This Month Action Plan</div>
+              <div className="text-xs text-slate-500 mt-1">
+                Use this checklist each month. Then keep screenshots as proof of completion.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 print:hidden">
+              <button type="button" onClick={copyInstructions} className="text-sm font-semibold rounded-xl border px-3 py-2 hover:bg-slate-50">
+                Copy
+              </button>
+              <button type="button" onClick={printInstructions} className="text-sm font-semibold rounded-xl px-3 py-2 bg-slate-900 text-white hover:bg-slate-800">
+                Print / PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {actionPlanSteps.map((s, idx) => (
+              <div key={idx} className="rounded-xl border bg-slate-50 p-3">
+                <div className="text-xs font-semibold text-slate-500">Step {idx + 1}</div>
+                <div className="mt-1 text-sm text-slate-900">{s}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Stat Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Emergency minimum" value={fmtUSD(emergencyHeldInFO)} hint="Required balance in Family Office" />
           <StatCard label="Reserved for open needs" value={fmtUSD(totalReservedOpen)} hint="Counts toward Family Office reserve" />
@@ -486,6 +584,7 @@ export default function App() {
           <StatCard label="Excess after rules" value={fmtUSD(excess)} hint="Available for wealth creation" emphasis={excess >= 0 ? "good" : "bad"} />
         </div>
 
+        {/* Inputs */}
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border bg-white p-5">
             <div className="text-sm font-semibold">Cash In</div>
@@ -547,13 +646,14 @@ export default function App() {
           </div>
         </div>
 
+        {/* Needs */}
         <div className="rounded-2xl border bg-white p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-lg font-semibold">Upcoming Cash Needs (Next 6 Months)</div>
               <div className="text-xs text-slate-500 mt-1">Funded balances carry forward … mark Paid to archive and stop rolling.</div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 print:hidden">
               <button type="button" onClick={addNeed} className="text-sm font-semibold rounded-xl border px-3 py-2 hover:bg-slate-50">
                 + Add item
               </button>
@@ -572,8 +672,8 @@ export default function App() {
                   <th className="pb-2">Target</th>
                   <th className="pb-2">Already funded</th>
                   <th className="pb-2">Remaining</th>
-                  <th className="pb-2">Paid</th>
-                  <th className="pb-2" />
+                  <th className="pb-2 print:hidden">Paid</th>
+                  <th className="pb-2 print:hidden" />
                 </tr>
               </thead>
               <tbody className="text-slate-800">
@@ -608,12 +708,12 @@ export default function App() {
                         <MoneyInput value={n.funded} onChange={(v) => updateNeed(n.id, { funded: v })} />
                       </td>
                       <td className="py-2 pr-2 font-semibold">{fmtUSD(remaining)}</td>
-                      <td className="py-2 pr-2">
+                      <td className="py-2 pr-2 print:hidden">
                         <button type="button" onClick={() => markPaid(n.id)} className="text-sm font-semibold rounded-xl border px-3 py-2 hover:bg-slate-50">
                           Mark paid
                         </button>
                       </td>
-                      <td className="py-2 text-right">
+                      <td className="py-2 text-right print:hidden">
                         <button type="button" onClick={() => removeNeed(n.id)} className="text-slate-500 hover:text-slate-900" title="Remove">
                           ×
                         </button>
@@ -639,54 +739,58 @@ export default function App() {
               <div className="mt-1 text-lg font-semibold">{fmtUSD(totalPaidHistorical)}</div>
             </div>
           </div>
+        </div>
 
-          <div className="mt-5 rounded-2xl border bg-white">
-            <div className="p-4 flex items-center justify-between">
-              <div>
-                <div className="font-semibold">Paid (Archived)</div>
-                <div className="text-xs text-slate-500">Kept for history … excluded from Family Office reserve math</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-slate-500">{paidNeeds.length} total</div>
-                <Toggle checked={showPaid} onChange={(v) => patch({ showPaid: v })} />
-              </div>
+        {/* Transfer Instructions */}
+        <div className="rounded-2xl border bg-white p-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-lg font-semibold">Monthly Transfer Instructions</div>
+              <div className="text-xs text-slate-500 mt-1">Run monthly … keep screenshots as proof of completion.</div>
             </div>
+            <div className="flex items-center gap-2 print:hidden">
+              <button type="button" onClick={copyInstructions} className="text-sm font-semibold rounded-xl border px-3 py-2 hover:bg-slate-50">
+                Copy
+              </button>
+              <button type="button" onClick={printInstructions} className="text-sm font-semibold rounded-xl px-3 py-2 bg-slate-900 text-white hover:bg-slate-800">
+                Print / PDF
+              </button>
+            </div>
+          </div>
 
-            {showPaid ? (
-              <div className="px-4 pb-4 overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="text-left text-slate-500">
-                      <th className="pb-2">Need</th>
-                      <th className="pb-2">Due</th>
-                      <th className="pb-2">Target</th>
-                      <th className="pb-2">Funded at time of pay</th>
-                      <th className="pb-2">Paid month</th>
-                      <th className="pb-2" />
-                    </tr>
-                  </thead>
-                  <tbody className="text-slate-800">
-                    {paidNeeds.map((n) => (
-                      <tr key={n.id} className="border-t">
-                        <td className="py-2">{n.name || "—"}</td>
-                        <td className="py-2">{n.dueMonth}</td>
-                        <td className="py-2">{fmtUSD(toNumber(n.target))}</td>
-                        <td className="py-2">{fmtUSD(toNumber(n.funded))}</td>
-                        <td className="py-2">{n.paidMonth || "—"}</td>
-                        <td className="py-2 text-right">
-                          <button type="button" onClick={() => reopenNeed(n.id)} className="text-sm font-semibold rounded-xl border px-3 py-2 hover:bg-slate-50">
-                            Reopen
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+          <div className="mt-2 text-xs text-slate-500">From: {fromFamilyOffice}</div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-slate-500">
+                  <th className="pb-2">From</th>
+                  <th className="pb-2">To</th>
+                  <th className="pb-2">Amount</th>
+                  <th className="pb-2">Purpose</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-800">
+                {transfers.map((t, idx) => (
+                  <tr key={idx} className={"border-t " + (idx === 3 ? "font-semibold" : "")}>
+                    <td className="py-2">{t.from}</td>
+                    <td className="py-2">{t.to}</td>
+                    <td className={"py-2 " + (idx === 3 ? (t.amount >= 0 ? "text-emerald-700" : "text-red-700") : "")}>
+                      {fmtUSD(t.amount)}
+                    </td>
+                    <td className="py-2">{t.purpose}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 text-xs text-slate-500">
+            Tip: Click “Fund needs this month” to update funded balances.
           </div>
         </div>
       </div>
     </div>
   );
 }
+
